@@ -1,12 +1,12 @@
-# Hunting the Invisible - Reverse Engineering Dynamic Import Resolution
+# Hunting the Invisible - Reverse Engineering Runtime Import Resolution
 
-![technique](https://img.shields.io/badge/Technique-Dynamic%20IAT-red) ![tools](https://img.shields.io/badge/Tools-IDA%20%7C%20x64dbg%20%7C%20Python-green)
+![technique](https://img.shields.io/badge/Technique-Runtime%20IAT-red) ![tools](https://img.shields.io/badge/Tools-IDA%20%7C%20x64dbg%20%7C%20Python-green)
 
 ## Context and Relevance
-This repository documents a **dynamic import resolution technique used by Valve Anti-Cheat (VAC)** in several runtime modules distributed to users. While the specific modules analyzed here are no longer actively enforced, the technique itself remains relevant and is preserved for technical documentation and reverse engineering reference.
+This repository documents a **runtime import resolution technique used by Valve Anti-Cheat (VAC)** in several runtime modules distributed to users. While the specific modules analyzed here are no longer actively enforced, the technique itself remains relevant and is preserved for technical documentation and reverse engineering reference.
 
 --- 
-Imagine you are analyzing a suspicious executable, intent on uncovering its true nature. You open it in your preferred disassembler, expecting to find the usual clues, but immediately something feels *off*. Not just a little off, profoundly off. The Import Address Table (IAT), a fundamental structure in Windows executables that declares all external API dependencies, is almost **empty**. According to the Portable Executable (PE) headers, this program barely imports anything at all. There are no obvious calls to memory allocation functions, no thread creation routines, and no evidence of suspicious behavior on paper. 
+Imagine you are analyzing a suspicious executable, intent on uncovering its true nature. You open it in your preferred disassembler, expecting to find the usual clues, but immediately something feels *off*. Not just a little off — profoundly so. The Import Address Table (IAT), a fundamental structure in Windows executables that declares all external API dependencies, is almost **empty**. According to the Portable Executable (PE) headers, this program barely imports anything at all. There are no obvious calls to memory allocation functions, no thread creation routines, and no evidence of suspicious behavior on paper. 
 
 Yet, this stark emptiness stands in sharp contrast to the binary’s observed behavior. Below, we present **two binaries opened in IDA**, displayed exactly as static analysis reveals them. The first is a **typical binary**, with a large and explicit Import Address Table clearly outlining its external dependencies:
 
@@ -24,9 +24,9 @@ This second executable imports only a minimal subset of `KERNEL32` functions, ju
 
 **How is this possible?**
 
-The answer lies in the fact that the real imports are never declared in the PE file itself. Instead, they are resolved **dynamically at runtime**, and stored in a custom, in-memory **Import Address Table**. This sophisticated technique effectively renders the import table invisible to static analysis, only to reconstruct it on-the-fly during execution.
+The answer lies in the fact that the real imports are never declared in the PE file itself. Instead, they are resolved **at runtime**, and stored in a custom, in-memory **Import Address Table**. This sophisticated technique effectively renders the import table invisible to static analysis, only to reconstruct it on-the-fly during execution.
 
-Welcome to the intricate realm of **dynamic IAT resolution**.
+Welcome to the intricate realm of **runtime IAT resolution**.
 
 ---
 ## Initial Analysis: Static Inspection and Its Limits
@@ -53,7 +53,7 @@ The screenshots below capture this function as observed through static analysis.
 
 At this stage, static analysis has reached its **practical limit**. The PE’s Import Address Table is intentionally sparse, and the binary contains **no readable API strings** that might explain its behavior. On disk, there simply isn’t enough information to justify what the binary will ultimately accomplish at runtime.
 
-The only viable path forward is to **trace execution dynamically**, watching as the program unfolds its true nature.
+The only viable path forward is to **trace execution at runtime**, watching as the program unfolds its true nature.
 
 When observed at runtime, the picture transforms dramatically. The very same subroutine that previously performed innocuous checks is now fully populated with **valid pointers to imported functions**, confirming that the **bootstrap phase** has completed successfully and the resolver infrastructure is firmly in place.
 
@@ -71,7 +71,7 @@ To better understand the complex memory layout constructed by the resolver, cons
   <img src="images/Diagram.png" alt="Runtime import resolution memory layout" width="1000"/>
 </p>
 
-As execution proceeds, the illusion of emptiness **gradually dissolves**. What initially appeared to be a complete lack of imports is revealed not as simplicity, but as deliberate deferral. Instead of declaring dependencies statically within the PE file, the binary defers all import resolution until runtime, reconstructing everything dynamically in memory.
+As execution proceeds, the illusion of emptiness **gradually dissolves**. What initially appeared to be a complete lack of imports is revealed not as simplicity, but as deliberate deferral. Instead of declaring dependencies statically within the PE file, the binary defers all import resolution until runtime, reconstructing everything in memory.
 
 The first concrete evidence of this dynamic reconstruction appears immediately after the bootstrap phase concludes. Dumping the relevant memory region reveals a block of data that is neither executable code nor a standard PE structure, yet is clearly organized and purposeful.
 
@@ -291,7 +291,7 @@ The binary does not rely on the PE import table at all, it builds, validates, an
 ---
 ## Annotating Runtime-Reconstructed Import Strings in IDA Pro
 
-The following Python script is designed to be run inside IDA Pro after loading the binary. Its purpose is to assign meaningful names to memory addresses containing dynamically reconstructed import-related strings (DLL names and API names). These strings do *not* exist in the PE file on disk; they are rebuilt at runtime and referenced via offsets by the dynamic import resolver.
+The following Python script is designed to be run inside IDA Pro after loading the binary. Its purpose is to assign meaningful names to memory addresses containing dynamically reconstructed import-related strings (DLL names and API names). These strings do *not* exist in the PE file on disk; they are rebuilt at runtime and referenced via offsets by the runtime import resolver.
 
 By running this script, reverse engineers can improve the readability of the disassembly by labeling these strings, aiding in further analysis and understanding of the import resolution logic.
 
