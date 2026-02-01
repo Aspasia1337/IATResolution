@@ -1,7 +1,7 @@
-# Hunting the Invisible  
-## Reverse Engineering Dynamic Import Resolution
+# Hunting the Invisible - Reverse Engineering Dynamic Import Resolution
 
 ![technique](https://img.shields.io/badge/Technique-Dynamic%20IAT-red) ![tools](https://img.shields.io/badge/Tools-IDA%20%7C%20x64dbg%20%7C%20Python-green)
+
 ## Context and Relevance
 This repository documents a **dynamic import resolution technique used by Valve Anti-Cheat (VAC)** in several runtime modules distributed to users. While the specific modules analyzed here are no longer actively enforced, the technique itself remains relevant and is preserved for technical documentation and reverse engineering reference.
 
