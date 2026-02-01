@@ -281,7 +281,9 @@ Below are two views of this validation function: first, in **IDA**, where the ru
 
 And second, the **same region observed live in x64dbg**, confirming that the resolved pointers in memory match exactly what IDA now shows symbolically:
 
-![[images/x64dbg_Check.png]]
+<p align="center">
+  <img src="images/x64dbg_Check.png" alt="x64 view" width="1000"/>
+</p>
 
 At this point, there is no ambiguity left.  
 The binary does not rely on the PE import table at all, it builds, validates, and exclusively uses its own **runtime-resolved IAT**. This definitive evidence closes the case: the import table has been rendered invisible to static analysis and fully reconstructed at runtime, a technique that elegantly defeats traditional reverse engineering methods.
