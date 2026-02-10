@@ -7,7 +7,7 @@ This repository documents a **classic Windows runtime import resolution techniqu
 
 The mechanism itself is neither new nor unusual in Windows internals: dynamically resolving APIs instead of relying on the static Import Address Table has been used for decades in packers, protectors, anti-cheat systems and malware.  
 
-However, for analysts coming from environments such as Android, where symbols, JNI boundaries and framework APIs provide early semantic context, encountering a nearly empty Import Address Table can make the program initially appear inert during static analysis.
+However, for analysts coming from environments such as Android, where symbols, JNI boundaries and framework APIs provide early semantic context, encountering a nearly empty Import Address Table can make the program appear inactive during static analysis.
 
 The goal of this write-up is therefore not to introduce a novel method, but to **walk through a practical example and show how to recognize and reason about it during reverse engineering**.
 
@@ -22,19 +22,19 @@ Yet during execution, the binary performs all of these operations normally.
 
 This apparent contradiction is a well-known consequence of **runtime API resolution**: the program does not declare its dependencies in the PE file, but reconstructs them dynamically in memory and uses the resulting table as its effective Import Address Table.
 
-This contrasts with the behavior observed during execution. Below, we present **two binaries opened in IDA**, displayed exactly as static analysis reveals them. The first is a **typical binary**, with a large and explicit Import Address Table clearly outlining its external dependencies:
+This differs from the behavior observed during execution. Below, we present **two binaries opened in IDA**, displayed exactly as static analysis reveals them. The first is a **typical binary**, with a large and explicit Import Address Table clearly outlining its external dependencies:
 
 <p align="center">
   <img src="images/CommonImports.png" alt="Binary with conventional Import Address Table" width="1000"/>
 </p>
 
-Directly beneath it, a second binary appears, **similar in functionality but radically different in form**:
+Directly beneath it, a second binary appears, **functionally similar but structurally different**:
 
 <p align="center">
   <img src="images/NoImports.png" alt="Binary with minimal import table under static analysis" width="1000"/>
 </p>
 
-This second executable imports only a minimal subset of `KERNEL32` functions, just enough to bootstrap execution, while not declaring its dependencies in the PE headers. And yet, when executed, it performs **everything** one would expect: memory allocation, thread creation, process inspection, the full operational spectrum unfolds seamlessly.
+This second executable imports only a minimal subset of `KERNEL32` functions, just enough to bootstrap execution, while not declaring its dependencies in the PE headers. When executed, it performs the expected operations: memory allocation, thread creation and process inspection.
 
 This behavior is expected when a binary reconstructs its imports at runtime.
 
@@ -49,11 +49,11 @@ At this point, the Import Address Table is too sparse to explain the observed be
 
 As with most runtime resolvers, execution begins with a small bootstrap routine whose purpose is to obtain the minimal functionality required to initialize the resolver.
 
-In this particular binary, the bootstrap logic is deliberately concealed within what initially appears to be an ordinary initialization routine. Near the program’s entry point, we encounter a function executing a handful of **seemingly mundane operations**: retrieving a few module handles, resolving a couple of function pointers, clearing memory regions, and conducting a series of checks. 
+In this particular binary, the bootstrap logic is deliberately concealed within what initially appears to be an ordinary initialization routine. Near the program’s entry point, we encounter a function executing a small set of ordinary operations: retrieving a few module handles, resolving a couple of function pointers, clearing memory regions, and conducting a series of checks. 
 
 Statically, the routine appears ordinary because it performs only a few initialization steps.
 
-The screenshots below capture this function as observed through static analysis. The control flow is linear and straightforward, API usage minimal, and there is no clear indication that a comprehensive import resolution mechanism is being constructed beneath the surface.
+The screenshots below capture this function as observed through static analysis. The control flow is linear and straightforward, API usage minimal, and there is no clear indication that a comprehensive import resolution mechanism is being constructed at this stage.
 
 <p align="center">
   <img src="images/bootstrap.png" alt="Bootstrap routine observed during static analysis" width="1000"/>
@@ -98,7 +98,7 @@ At the start of this memory region, we find what appears to be **resolver state 
 …
 ```
 
-These values do not correspond to API pointers or executable addresses. Instead, they serve as internal counters, offsets, and size limits that coordinate the resolution process. This is the resolver’s bookkeeping layer,  invisible at the PE level, yet absolutely essential for managing the complex structures that follow.
+These values do not correspond to API pointers or executable addresses. Instead, they serve as internal counters, offsets, and size limits that coordinate the resolution process. This acts as the resolver’s bookkeeping layer, not present in the PE file but necessary for managing the following structures.
 
 A short distance below, the memory dump reveals a compact and unmistakable structure: a list of module base addresses.
 
@@ -118,7 +118,7 @@ A short distance below, the memory dump reveals a compact and unmistakable struc
 
 Each entry is a valid `HMODULE`, corresponding to a DLL manually loaded by the resolver. This is not the operating system’s import table. Instead, it is a custom **runtime module cache**, populated on demand using `LoadLibraryExA`.
 
-Further down, the most revealing structure finally emerges: a long, contiguous sequence of function pointers, each resolved to its final address:
+Further down, the next structure contains a long, contiguous sequence of function pointers, each resolved to its final address:
 
 ```cpp
 0FF57CF8  7505CB00  kernel32.LoadLibraryExA
@@ -133,7 +133,7 @@ Further down, the most revealing structure finally emerges: a long, contiguous s
 …
 ```
 
-At this point the structure becomes clear.
+At this point the layout becomes clear.
 
 What we observe is a complete, fully functional **Import Address Table**, constructed entirely at runtime. Every entry corresponds to a genuine Windows API function, resolved via `GetProcAddress` and stored in a predictable, indexable layout. The table spans well over a hundred entries, covering a broad range of critical functionality: process management, memory operations, cryptography, service control, native NT calls, and debugging capabilities.
 
@@ -296,7 +296,7 @@ And second, the **same region observed live in x64dbg**, confirming that the res
   <img src="images/x64dbg_Check.png" alt="x64 view" width="1000"/>
 </p>
 
-At this point, there is no ambiguity left.  
+At this point, the behavior is now fully explained.  
 This confirms that the binary does not rely on the PE import table but instead builds and uses its own runtime-resolved IAT, a technique that significantly reduces the usefulness of purely static analysis and requires runtime observation.
 
 ---
