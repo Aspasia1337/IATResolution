@@ -1,14 +1,28 @@
-# Hunting the Invisible - Reverse Engineering Runtime Import Resolution
+# Reverse Engineering Runtime Import Resolution in Practice
 
 ![technique](https://img.shields.io/badge/Technique-Runtime%20IAT-red) ![tools](https://img.shields.io/badge/Tools-IDA%20%7C%20x64dbg%20%7C%20Python-green)
 
 ## Context and Relevance
-This repository documents a **runtime import resolution technique used by Valve Anti-Cheat (VAC)** in several runtime modules distributed to users. While the specific modules analyzed here are no longer actively enforced, the technique itself remains relevant and is preserved for technical documentation and reverse engineering reference.
+This repository documents a **classic Windows runtime import resolution technique** observed in a real-world module.
+
+The mechanism itself is neither new nor unusual in Windows internals: dynamically resolving APIs instead of relying on the static Import Address Table has been used for decades in packers, protectors, anti-cheat systems and malware.  
+
+However, for analysts coming from environments such as Android, where symbols, JNI boundaries and framework APIs provide early semantic context, encountering a nearly empty Import Address Table can make the program initially appear inert during static analysis.
+
+The goal of this write-up is therefore not to introduce a novel method, but to **walk through a practical example and show how to recognize and reason about it during reverse engineering**.
 
 --- 
-Imagine you are analyzing a suspicious executable, intent on uncovering its true nature. You open it in your preferred disassembler, expecting to find the usual clues, but immediately something feels *off*. Not just a little off, profoundly so. The Import Address Table (IAT), a fundamental structure in Windows executables that declares all external API dependencies, is almost **empty**. According to the Portable Executable (PE) headers, this program barely imports anything at all. There are no obvious calls to memory allocation functions, no thread creation routines, and no evidence of suspicious behavior on paper. 
 
-Yet, this stark emptiness stands in sharp contrast to the binary’s observed behavior. Below, we present **two binaries opened in IDA**, displayed exactly as static analysis reveals them. The first is a **typical binary**, with a large and explicit Import Address Table clearly outlining its external dependencies:
+When analyzing Windows binaries, a sparse Import Address Table is often an intentional design choice rather than an anomaly.
+
+In this case, the executable imports almost no high-level APIs according to the PE headers.  
+Statically, the program appears to lack memory allocation, thread creation, or process interaction capabilities.
+
+Yet during execution, the binary performs all of these operations normally.
+
+This apparent contradiction is a well-known consequence of **runtime API resolution**: the program does not declare its dependencies in the PE file, but reconstructs them dynamically in memory and uses the resulting table as its effective Import Address Table.
+
+This contrasts with the behavior observed during execution. Below, we present **two binaries opened in IDA**, displayed exactly as static analysis reveals them. The first is a **typical binary**, with a large and explicit Import Address Table clearly outlining its external dependencies:
 
 <p align="center">
   <img src="images/CommonImports.png" alt="Binary with conventional Import Address Table" width="1000"/>
@@ -20,18 +34,15 @@ Directly beneath it, a second binary appears, **similar in functionality but rad
   <img src="images/NoImports.png" alt="Binary with minimal import table under static analysis" width="1000"/>
 </p>
 
-This second executable imports only a minimal subset of `KERNEL32` functions, just enough to bootstrap execution, while masterfully concealing its true dependencies. And yet, when executed, it performs **everything** one would expect: memory allocation, thread creation, process inspection, the full operational spectrum unfolds seamlessly.
+This second executable imports only a minimal subset of `KERNEL32` functions, just enough to bootstrap execution, while not declaring its dependencies in the PE headers. And yet, when executed, it performs **everything** one would expect: memory allocation, thread creation, process inspection, the full operational spectrum unfolds seamlessly.
 
-**How is this possible?**
+This behavior is expected when a binary reconstructs its imports at runtime.
 
-The answer lies in the fact that the real imports are never declared in the PE file itself. Instead, they are resolved **at runtime**, and stored in a custom, in-memory **Import Address Table**. This sophisticated technique effectively renders the import table invisible to static analysis, only to reconstruct it on-the-fly during execution.
-
-Welcome to the intricate realm of **runtime IAT resolution**.
-
+This behavior is commonly referred to as runtime IAT resolution.
 ---
 ## Initial Analysis: Static Inspection and Its Limits
 
-At this juncture, static analysis has already sounded a clear alarm: the Import Address Table is far too sparse to account for the binary’s actual behavior. To uncover the truth lurking beneath this deceptive surface, one must follow the execution path dynamically, observing how the program evolves in memory.
+At this juncture, static analysis has already sounded a clear alarm: the Import Address Table is far too sparse to account for the binary’s actual behavior. To uncover the truth beneath this deceptive surface, one must follow the execution path dynamically, observing how the program evolves in memory.
 
 ### Stage 1: Bootstrap Phase and Minimal Resolver Setup
 
@@ -39,7 +50,7 @@ Every **dynamic import resolver** hinges on a critical **bootstrap phase**, a br
 
 In this particular binary, the bootstrap logic is deliberately concealed within what initially appears to be an ordinary initialization routine. Near the program’s entry point, we encounter a function executing a handful of **seemingly mundane operations**: retrieving a few module handles, resolving a couple of function pointers, clearing memory regions, and conducting a series of checks. 
 
-At first glance, **nothing about this code arouses suspicion**.
+Statically, the routine appears ordinary because it performs only a few initialization steps.ç
 
 The screenshots below capture this function as observed through static analysis. The control flow is linear and straightforward, API usage minimal, and there is no clear indication that a comprehensive import resolution mechanism is being constructed beneath the surface.
 
@@ -71,7 +82,7 @@ To better understand the complex memory layout constructed by the resolver, cons
   <img src="images/Diagram.png" alt="Runtime import resolution memory layout" width="1000"/>
 </p>
 
-As execution proceeds, the illusion of emptiness **gradually dissolves**. What initially appeared to be a complete lack of imports is revealed not as simplicity, but as deliberate deferral. Instead of declaring dependencies statically within the PE file, the binary defers all import resolution until runtime, reconstructing everything in memory.
+Once the bootstrap phase completes, memory inspection shows the expected resolver structures appearing in process memory. The binary progressively constructs an internal table containing module handles and function pointers.
 
 The first concrete evidence of this dynamic reconstruction appears immediately after the bootstrap phase concludes. Dumping the relevant memory region reveals a block of data that is neither executable code nor a standard PE structure, yet is clearly organized and purposeful.
 
@@ -121,12 +132,12 @@ Further down, the most revealing structure finally emerges: a long, contiguous s
 …
 ```
 
-This is the moment when the illusion fully collapses.
+At this point the structure becomes clear.
 
 What we observe is a complete, fully functional **Import Address Table**, constructed entirely at runtime. Every entry corresponds to a genuine Windows API function, resolved via `GetProcAddress` and stored in a predictable, indexable layout. The table spans well over a hundred entries, covering a broad range of critical functionality: process management, memory operations, cryptography, service control, native NT calls, and debugging capabilities.
 
 None of these pointers appear in the PE import directory.  
-None are visible to any static analysis tools.
+They do not appear in the PE import directory and therefore are not visible during initial static inspection.
 
 Yet from this point onward, the binary treats this custom table exactly as it would a normal IAT, indexing into it and invoking APIs directly, with no further resolution overhead or indirection.
 
@@ -286,7 +297,7 @@ And second, the **same region observed live in x64dbg**, confirming that the res
 </p>
 
 At this point, there is no ambiguity left.  
-The binary does not rely on the PE import table at all, it builds, validates, and exclusively uses its own **runtime-resolved IAT**. This definitive evidence closes the case: the import table has been rendered invisible to static analysis and fully reconstructed at runtime, a technique that elegantly defeats traditional reverse engineering methods.
+The binary does not rely on the PE import table at all, it builds, validates, and exclusively uses its own **runtime-resolved IAT**. This definitive evidence closes the case: the import table has been rendered invisible to static analysis and fully reconstructed at runtime, a technique a technique that significantly reduces the usefulness of purely static analysis and requires runtime observation.
 
 ---
 ## Annotating Runtime-Reconstructed Import Strings in IDA Pro
